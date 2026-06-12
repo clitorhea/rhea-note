@@ -290,9 +290,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list.SetSize(msg.Width-h, msg.Height-v)
 		m.linkList.SetSize(msg.Width-h, msg.Height-v)
 		m.viewport.Width = msg.Width - h
-		m.viewport.Height = msg.Height - v
+		m.viewport.Height = msg.Height - v - 4
 		m.editor.SetWidth(msg.Width - h)
-		m.editor.SetHeight(msg.Height - v - 2)
+		m.editor.SetHeight(msg.Height - v - 4)
 		if m.noteContent != "" {
 			m.viewport.SetContent(wrap.String(m.noteContent, m.viewport.Width))
 		}
