@@ -1,0 +1,14 @@
+# flyctl launch added from .gitignore
+# Binaries
+/secnotes
+/secnotes-server
+/bin/
+**/server-data
+**/store
+
+# OS specific files
+**/.DS_Store
+
+# Sync state
+**/.sync_state.json
+fly.toml

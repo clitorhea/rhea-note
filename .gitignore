@@ -1,6 +1,7 @@
 # Binaries
 /secnotes
 /secnotes-server
+/bin/
 
 # Local data directories
 server-data/
