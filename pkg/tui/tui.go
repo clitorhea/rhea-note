@@ -47,16 +47,18 @@ type model struct {
 	password    textinput.Model
 	viewport    viewport.Model
 	linkList    list.Model
-	editor      textarea.Model
-	state       int // 0: list, 1: password prompt, 2: view note, 3: links menu, 4: delete confirm, 5: edit note
-	selectedID  string
-	noteContent string
-	cfg         *config.Config
-	err         error
-	width       int
-	height      int
-	history     []string
-	pwCache     string
+	editor               textarea.Model
+	newPagePrompt        textinput.Model
+	state                int // 0: list, 1: password prompt, 2: view note, 3: links menu, 4: delete confirm, 5: edit note, 6: new page
+	selectedID           string
+	noteContent          string
+	cfg                  *config.Config
+	err                  error
+	width                int
+	height               int
+	history              []string
+	pwCache              string
+	creatingFromViewport bool
 }
 
 func InitialModel(cfg *config.Config, notes map[string]storage.LocalNoteInfo) model {
@@ -72,6 +74,10 @@ func InitialModel(cfg *config.Config, notes map[string]storage.LocalNoteInfo) mo
 	ti.EchoCharacter = '•'
 	ti.Focus()
 
+	np := textinput.New()
+	np.Placeholder = "New Page Name"
+	np.Focus()
+
 	vp := viewport.New(0, 0)
 
 	ta := textarea.New()
@@ -79,13 +85,14 @@ func InitialModel(cfg *config.Config, notes map[string]storage.LocalNoteInfo) mo
 	ta.Focus()
 
 	return model{
-		list:     m,
-		linkList: ll,
-		password: ti,
-		viewport: vp,
-		editor:   ta,
-		cfg:      cfg,
-		state:    0,
+		list:          m,
+		linkList:      ll,
+		password:      ti,
+		newPagePrompt: np,
+		viewport:      vp,
+		editor:        ta,
+		cfg:           cfg,
+		state:         0,
 	}
 }
 
@@ -132,6 +139,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.state = 4 // confirm delete
 					return m, nil
 				}
+			}
+			if msg.String() == "n" {
+				m.creatingFromViewport = false
+				m.newPagePrompt.SetValue("")
+				m.state = 6
+				return m, textinput.Blink
 			}
 
 		case 1: // Password prompt
@@ -186,6 +199,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = 4 // Confirm delete
 				return m, nil
 			}
+			if msg.String() == "n" {
+				m.creatingFromViewport = true
+				m.newPagePrompt.SetValue("")
+				m.state = 6
+				return m, textinput.Blink
+			}
 
 		case 3: // Links menu
 			if msg.String() == "esc" {
@@ -220,6 +239,36 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = 2
 				return m, nil
 			}
+
+		case 6: // New page prompt
+			if msg.String() == "esc" {
+				if m.creatingFromViewport {
+					m.state = 2
+				} else {
+					m.state = 0
+				}
+				return m, nil
+			}
+			if msg.String() == "enter" {
+				newName := m.newPagePrompt.Value()
+				if newName != "" {
+					if m.creatingFromViewport {
+						// Append to current note
+						if m.noteContent != "" {
+							m.noteContent += "\n"
+						}
+						m.noteContent += fmt.Sprintf("[[%s]]", newName)
+						m.encryptAndSaveNote() // saves parent
+						m.history = append(m.history, m.selectedID)
+					} else {
+						m.history = []string{}
+					}
+					
+					// Navigate to new note
+					m.selectedID = newName
+					return m.openNote()
+				}
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -249,6 +298,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.linkList, cmd = m.linkList.Update(msg)
 	case 5:
 		m.editor, cmd = m.editor.Update(msg)
+	case 6:
+		m.newPagePrompt, cmd = m.newPagePrompt.Update(msg)
 	}
 
 	return m, cmd
@@ -340,7 +391,7 @@ func (m model) View() string {
 		}
 		
 		header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).Render(fmt.Sprintf("Viewing Note: %s", m.selectedID))
-		footerText := "(e: edit) • (d: delete) • "
+		footerText := "(e: edit) • (d: delete) • (n: new page) • "
 		if len(m.history) > 0 {
 			footerText += fmt.Sprintf("(esc/q: back to %s)", m.history[len(m.history)-1])
 		} else {
@@ -367,6 +418,12 @@ func (m model) View() string {
 		footer := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("(esc or ctrl+s to save and exit)")
 		content := fmt.Sprintf("%s\n\n%s\n\n%s", header, m.editor.View(), footer)
 		return docStyle.Render(content)
+	
+	case 6:
+		return docStyle.Render(fmt.Sprintf(
+			"Enter name for new page:\n\n%s\n\n(esc to cancel)",
+			m.newPagePrompt.View(),
+		))
 	}
 
 	return ""
