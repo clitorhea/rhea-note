@@ -30,7 +30,14 @@ func (c *Client) Synchronize(storeDir string) error {
 		lastSyncNote, existsLastSync := lastSyncState[id]
 
 		if !existsRemote {
-			// Doesn't exist on remote. Push it.
+			if existsLastSync {
+				// Was previously synced, but now missing remotely -> DELETED remotely!
+				logger.Infof("Deleting local note because it was deleted remotely: %s", id)
+				storage.DeleteNoteLocal(storeDir, id)
+				continue
+			}
+
+			// Doesn't exist on remote and no sync state -> completely new. Push it.
 			logger.Infof("Pushing new local note: %s", id)
 			payload, err := storage.LoadNoteLocal(storeDir, id)
 			if err == nil {
@@ -81,10 +88,16 @@ func (c *Client) Synchronize(storeDir string) error {
 	// 2. Process remote notes that are not local
 	for id := range remoteIndex {
 		if _, exists := localNotes[id]; !exists {
-			logger.Infof("Pulling new remote note: %s", id)
-			payload, err := c.DownloadNote(id)
-			if err == nil {
-				storage.SaveNoteLocal(storeDir, id, payload)
+			if _, existsLastSync := lastSyncState[id]; existsLastSync {
+				// Was previously synced, but now missing locally -> DELETED locally!
+				logger.Infof("Deleting remote note because it was deleted locally: %s", id)
+				c.DeleteNote(id)
+			} else {
+				logger.Infof("Pulling new remote note: %s", id)
+				payload, err := c.DownloadNote(id)
+				if err == nil {
+					storage.SaveNoteLocal(storeDir, id, payload)
+				}
 			}
 		}
 	}

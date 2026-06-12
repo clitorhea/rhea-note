@@ -5,9 +5,11 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -18,7 +20,7 @@ import (
 )
 
 var (
-	docStyle = lipgloss.NewStyle().Margin(1, 2)
+	docStyle  = lipgloss.NewStyle().Margin(1, 2)
 	linkRegex = regexp.MustCompile(`\[\[(.*?)\]\]`)
 )
 
@@ -44,7 +46,8 @@ type model struct {
 	password    textinput.Model
 	viewport    viewport.Model
 	linkList    list.Model
-	state       int // 0: list, 1: password prompt, 2: viewing note, 3: links menu
+	editor      textarea.Model
+	state       int // 0: list, 1: password prompt, 2: view note, 3: links menu, 4: delete confirm, 5: edit note
 	selectedID  string
 	noteContent string
 	cfg         *config.Config
@@ -56,21 +59,7 @@ type model struct {
 }
 
 func InitialModel(cfg *config.Config, notes map[string]storage.LocalNoteInfo) model {
-	var items []list.Item
-	
-	var sortedNotes []storage.LocalNoteInfo
-	for _, n := range notes {
-		sortedNotes = append(sortedNotes, n)
-	}
-	sort.Slice(sortedNotes, func(i, j int) bool {
-		return sortedNotes[i].UpdatedAt.After(sortedNotes[j].UpdatedAt)
-	})
-
-	for _, n := range sortedNotes {
-		items = append(items, item{id: n.ID, modTime: n.UpdatedAt})
-	}
-
-	m := list.New(items, list.NewDefaultDelegate(), 0, 0)
+	m := list.New(buildItems(notes), list.NewDefaultDelegate(), 0, 0)
 	m.Title = "SecNotes"
 
 	ll := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
@@ -84,18 +73,38 @@ func InitialModel(cfg *config.Config, notes map[string]storage.LocalNoteInfo) mo
 
 	vp := viewport.New(0, 0)
 
+	ta := textarea.New()
+	ta.Placeholder = "Write your note here..."
+	ta.Focus()
+
 	return model{
 		list:     m,
 		linkList: ll,
 		password: ti,
 		viewport: vp,
+		editor:   ta,
 		cfg:      cfg,
 		state:    0,
 	}
 }
 
+func buildItems(notes map[string]storage.LocalNoteInfo) []list.Item {
+	var items []list.Item
+	var sortedNotes []storage.LocalNoteInfo
+	for _, n := range notes {
+		sortedNotes = append(sortedNotes, n)
+	}
+	sort.Slice(sortedNotes, func(i, j int) bool {
+		return sortedNotes[i].UpdatedAt.After(sortedNotes[j].UpdatedAt)
+	})
+	for _, n := range sortedNotes {
+		items = append(items, item{id: n.ID, modTime: n.UpdatedAt})
+	}
+	return items
+}
+
 func (m model) Init() tea.Cmd {
-	return nil
+	return textarea.Blink
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -111,11 +120,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				i, ok := m.list.SelectedItem().(item)
 				if ok {
 					m.selectedID = i.id
-					m.history = []string{} // clear history when entering from main list
+					m.history = []string{}
 					return m.openNote()
 				}
 			}
-			
+			if msg.String() == "d" || msg.String() == "delete" {
+				i, ok := m.list.SelectedItem().(item)
+				if ok {
+					m.selectedID = i.id
+					m.state = 4 // confirm delete
+					return m, nil
+				}
+			}
+
 		case 1: // Password prompt
 			if msg.String() == "enter" {
 				m.pwCache = m.password.Value()
@@ -126,21 +143,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = 0
 				return m, nil
 			}
-			
+
 		case 2: // Viewport
 			if msg.String() == "esc" || msg.String() == "q" {
 				if len(m.history) > 0 {
-					// Pop history
 					m.selectedID = m.history[len(m.history)-1]
 					m.history = m.history[:len(m.history)-1]
 					return m.openNote()
 				}
 				m.state = 0
 				m.err = nil
+				m.refreshList()
 				return m, nil
 			}
 			if msg.String() == "tab" || msg.String() == "l" {
-				// Extract links
 				matches := linkRegex.FindAllStringSubmatch(m.noteContent, -1)
 				var items []list.Item
 				seen := make(map[string]bool)
@@ -159,10 +175,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+			if msg.String() == "e" {
+				// Switch to edit mode
+				m.editor.SetValue(m.noteContent)
+				m.state = 5
+				return m, nil
+			}
+			if msg.String() == "d" || msg.String() == "delete" {
+				m.state = 4 // Confirm delete
+				return m, nil
+			}
 
 		case 3: // Links menu
 			if msg.String() == "esc" {
-				m.state = 2 // go back to viewport
+				m.state = 2
 				return m, nil
 			}
 			if msg.String() == "enter" {
@@ -173,6 +199,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m.openNote()
 				}
 			}
+
+		case 4: // Delete confirm
+			if strings.ToLower(msg.String()) == "y" {
+				storage.DeleteNoteLocal(m.cfg.StoreDir, m.selectedID)
+				m.state = 0
+				m.refreshList()
+				return m, nil
+			} else if msg.String() == "n" || msg.String() == "esc" {
+				m.state = 0
+				return m, nil
+			}
+
+		case 5: // Edit mode
+			if msg.String() == "esc" || msg.String() == "ctrl+s" {
+				m.noteContent = m.editor.Value()
+				m.encryptAndSaveNote()
+				m.viewport.SetContent(m.noteContent)
+				m.state = 2
+				return m, nil
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -181,6 +227,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.linkList.SetSize(msg.Width-h, msg.Height-v)
 		m.viewport.Width = msg.Width - h
 		m.viewport.Height = msg.Height - v
+		m.editor.SetWidth(msg.Width - h)
+		m.editor.SetHeight(msg.Height - v - 2)
 		m.width = msg.Width
 		m.height = msg.Height
 	}
@@ -195,9 +243,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport, cmd = m.viewport.Update(msg)
 	case 3:
 		m.linkList, cmd = m.linkList.Update(msg)
+	case 5:
+		m.editor, cmd = m.editor.Update(msg)
 	}
 
 	return m, cmd
+}
+
+func (m *model) refreshList() {
+	notes, _ := storage.ListNotesLocalWithTime(m.cfg.StoreDir)
+	m.list.SetItems(buildItems(notes))
 }
 
 func (m model) openNote() (tea.Model, tea.Cmd) {
@@ -220,7 +275,8 @@ func (m *model) decryptNote() {
 	
 	ciphertext, err := storage.LoadNoteLocal(m.cfg.StoreDir, m.selectedID)
 	if err != nil {
-		m.err = fmt.Errorf("failed to load note %s: %v", m.selectedID, err)
+		// Note doesn't exist yet, we will start with empty content
+		m.err = nil
 		m.noteContent = ""
 		m.viewport.SetContent("")
 		return
@@ -238,6 +294,19 @@ func (m *model) decryptNote() {
 	m.noteContent = string(plaintext)
 	m.viewport.SetContent(m.noteContent)
 	m.err = nil
+}
+
+func (m *model) encryptAndSaveNote() {
+	key := crypto.DeriveKey(m.pwCache, m.cfg.Salt)
+	ciphertext, err := crypto.Encrypt([]byte(m.noteContent), key)
+	if err != nil {
+		m.err = fmt.Errorf("failed to encrypt: %v", err)
+		return
+	}
+	err = storage.SaveNoteLocal(m.cfg.StoreDir, m.selectedID, ciphertext)
+	if err != nil {
+		m.err = fmt.Errorf("failed to save: %v", err)
+	}
 }
 
 func (m model) View() string {
@@ -266,22 +335,33 @@ func (m model) View() string {
 		}
 		
 		header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).Render(fmt.Sprintf("Viewing Note: %s", m.selectedID))
-		footerText := "(esc or q to go back)"
+		footerText := "(e: edit) • (d: delete) • "
 		if len(m.history) > 0 {
-			footerText = fmt.Sprintf("(esc or q to go back to %s)", m.history[len(m.history)-1])
+			footerText += fmt.Sprintf("(esc/q: back to %s)", m.history[len(m.history)-1])
+		} else {
+			footerText += "(esc/q: back)"
 		}
 		
 		matches := linkRegex.FindAllStringSubmatch(m.noteContent, -1)
 		if len(matches) > 0 {
-			footerText += " • (tab or l to jump to links)"
+			footerText += " • (tab/l: jump links)"
 		}
 
 		footer := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(footerText)
-		
 		content := fmt.Sprintf("%s\n\n%s\n\n%s", header, m.viewport.View(), footer)
 		return docStyle.Render(content)
+
 	case 3:
 		return docStyle.Render(m.linkList.View())
+	
+	case 4:
+		return docStyle.Render(fmt.Sprintf("Are you sure you want to delete '%s'? (y/N)", m.selectedID))
+	
+	case 5:
+		header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")).Render(fmt.Sprintf("Editing Note: %s", m.selectedID))
+		footer := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("(esc or ctrl+s to save and exit)")
+		content := fmt.Sprintf("%s\n\n%s\n\n%s", header, m.editor.View(), footer)
+		return docStyle.Render(content)
 	}
 
 	return ""

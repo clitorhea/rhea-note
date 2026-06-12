@@ -34,6 +34,12 @@ func SaveNoteLocal(storeDir, noteID string, payload []byte) error {
 	return os.WriteFile(notePath, payload, 0600)
 }
 
+// DeleteNoteLocal removes a local encrypted note file.
+func DeleteNoteLocal(storeDir, noteID string) error {
+	notePath := filepath.Join(storeDir, EncodeID(noteID)+".enc")
+	return os.Remove(notePath)
+}
+
 // LoadNoteLocal reads the encrypted payload from a local file.
 func LoadNoteLocal(storeDir, noteID string) ([]byte, error) {
 	notePath := filepath.Join(storeDir, EncodeID(noteID)+".enc")
