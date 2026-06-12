@@ -15,6 +15,38 @@ local function get_note_id(file_path)
     return vim.fn.fnamemodify(filename, ":r")
 end
 
+local function goto_secnote()
+    local line = vim.api.nvim_get_current_line()
+    local col = vim.api.nvim_win_get_cursor(0)[2]
+    
+    local i = col + 1
+    local start_idx = nil
+    local end_idx = nil
+    
+    for j = i, 1, -1 do
+        if string.sub(line, j, j+1) == "[[" then
+            start_idx = j + 2
+            break
+        end
+    end
+    
+    if start_idx then
+        for j = i, string.len(line) do
+            if string.sub(line, j, j+1) == "]]" then
+                end_idx = j - 1
+                break
+            end
+        end
+    end
+    
+    if start_idx and end_idx and start_idx <= end_idx then
+        local target = string.sub(line, start_idx, end_idx)
+        vim.cmd("e " .. target .. ".secnote")
+    else
+        vim.notify("No SecNotes link [[...]] under cursor", vim.log.levels.WARN)
+    end
+end
+
 vim.api.nvim_create_autocmd("BufReadCmd", {
     pattern = "*.secnote",
     callback = function(args)
@@ -48,6 +80,9 @@ vim.api.nvim_create_autocmd("BufReadCmd", {
         
         vim.bo[args.buf].modified = false
         vim.bo[args.buf].buftype = "acwrite" -- Allow saving via BufWriteCmd
+        
+        -- Map 'gf' to jump to links inside this buffer
+        vim.keymap.set('n', 'gf', goto_secnote, { buffer = args.buf, silent = true, desc = "Go to SecNotes link" })
     end
 })
 
