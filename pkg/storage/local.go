@@ -1,8 +1,10 @@
 package storage
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -11,18 +13,30 @@ type LocalNoteInfo struct {
 	UpdatedAt time.Time
 }
 
+func EncodeID(id string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(id))
+}
+
+func DecodeID(encoded string) (string, error) {
+	b, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
 // SaveNoteLocal writes the encrypted payload to a local file.
 func SaveNoteLocal(storeDir, noteID string, payload []byte) error {
 	if err := os.MkdirAll(storeDir, 0700); err != nil {
 		return err
 	}
-	notePath := filepath.Join(storeDir, noteID+".enc")
+	notePath := filepath.Join(storeDir, EncodeID(noteID)+".enc")
 	return os.WriteFile(notePath, payload, 0600)
 }
 
 // LoadNoteLocal reads the encrypted payload from a local file.
 func LoadNoteLocal(storeDir, noteID string) ([]byte, error) {
-	notePath := filepath.Join(storeDir, noteID+".enc")
+	notePath := filepath.Join(storeDir, EncodeID(noteID)+".enc")
 	return os.ReadFile(notePath)
 }
 
@@ -38,9 +52,13 @@ func ListNotesLocal(storeDir string) ([]string, error) {
 
 	var notes []string
 	for _, entry := range entries {
-		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".enc" {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".enc") {
 			name := entry.Name()
-			notes = append(notes, name[:len(name)-4]) // strip .enc
+			encodedID := name[:len(name)-4] // strip .enc
+			id, err := DecodeID(encodedID)
+			if err == nil {
+				notes = append(notes, id)
+			}
 		}
 	}
 	return notes, nil
@@ -58,14 +76,17 @@ func ListNotesLocalWithTime(storeDir string) (map[string]LocalNoteInfo, error) {
 
 	notes := make(map[string]LocalNoteInfo)
 	for _, entry := range entries {
-		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".enc" {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".enc") {
 			name := entry.Name()
-			id := name[:len(name)-4]
-			info, err := entry.Info()
+			encodedID := name[:len(name)-4]
+			id, err := DecodeID(encodedID)
 			if err == nil {
-				notes[id] = LocalNoteInfo{
-					ID:        id,
-					UpdatedAt: info.ModTime(),
+				info, err := entry.Info()
+				if err == nil {
+					notes[id] = LocalNoteInfo{
+						ID:        id,
+						UpdatedAt: info.ModTime(),
+					}
 				}
 			}
 		}

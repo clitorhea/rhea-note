@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/clitorhea/rhea-note/pkg/storage"
 )
 
 type IndexEntry struct {
@@ -46,15 +48,25 @@ func (c *Client) FetchIndex() (map[string]IndexEntry, error) {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	var index map[string]IndexEntry
-	if err := json.NewDecoder(resp.Body).Decode(&index); err != nil {
+	var rawIndex map[string]IndexEntry
+	if err := json.NewDecoder(resp.Body).Decode(&rawIndex); err != nil {
 		return nil, err
 	}
-	return index, nil
+	
+	decodedIndex := make(map[string]IndexEntry)
+	for encodedID, entry := range rawIndex {
+		id, err := storage.DecodeID(encodedID)
+		if err == nil {
+			entry.NoteID = id
+			decodedIndex[id] = entry
+		}
+	}
+
+	return decodedIndex, nil
 }
 
 func (c *Client) DownloadNote(noteID string) ([]byte, error) {
-	req, err := http.NewRequest("GET", c.ServerURL+"/notes/"+noteID, nil)
+	req, err := http.NewRequest("GET", c.ServerURL+"/notes/"+storage.EncodeID(noteID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +86,7 @@ func (c *Client) DownloadNote(noteID string) ([]byte, error) {
 }
 
 func (c *Client) UploadNote(noteID string, payload []byte) error {
-	req, err := http.NewRequest("PUT", c.ServerURL+"/notes/"+noteID, bytes.NewReader(payload))
+	req, err := http.NewRequest("PUT", c.ServerURL+"/notes/"+storage.EncodeID(noteID), bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
@@ -94,7 +106,7 @@ func (c *Client) UploadNote(noteID string, payload []byte) error {
 }
 
 func (c *Client) DeleteNote(noteID string) error {
-	req, err := http.NewRequest("DELETE", c.ServerURL+"/notes/"+noteID, nil)
+	req, err := http.NewRequest("DELETE", c.ServerURL+"/notes/"+storage.EncodeID(noteID), nil)
 	if err != nil {
 		return err
 	}
