@@ -1,6 +1,9 @@
 # Build Stage
 FROM golang:alpine AS builder
 
+# Install make
+RUN apk add --no-cache make
+
 WORKDIR /app
 
 # Download dependencies
@@ -9,7 +12,7 @@ RUN go mod download
 
 # Copy source and build
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o secnotes-server ./cmd/server
+RUN make build-linux
 
 # Final Stage (Minimal Image)
 FROM alpine:latest
@@ -19,7 +22,7 @@ RUN apk --no-cache add ca-certificates
 WORKDIR /root/
 
 # Copy the pre-built binary
-COPY --from=builder /app/secnotes-server .
+COPY --from=builder /app/bin/linux-amd64/secnotes-server .
 
 # Create the data directory for persistent storage
 RUN mkdir -p /data/server-data
