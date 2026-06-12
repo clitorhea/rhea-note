@@ -1,0 +1,13 @@
+# Binaries
+secnotes
+secnotes-server
+
+# Local data directories
+server-data/
+store/
+
+# OS specific files
+.DS_Store
+
+# Sync state
+.sync_state.json

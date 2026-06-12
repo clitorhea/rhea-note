@@ -1,0 +1,99 @@
+package sync
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/clitorhea/rhea-note/pkg/logger"
+	"github.com/clitorhea/rhea-note/pkg/storage"
+)
+
+func (c *Client) Synchronize(storeDir string) error {
+	remoteIndex, err := c.FetchIndex()
+	if err != nil {
+		return fmt.Errorf("failed to fetch remote index: %v", err)
+	}
+
+	localNotes, err := storage.ListNotesLocalWithTime(storeDir)
+	if err != nil {
+		return fmt.Errorf("failed to list local notes: %v", err)
+	}
+
+	lastSyncState, err := loadSyncState(storeDir)
+	if err != nil {
+		return fmt.Errorf("failed to load sync state: %v", err)
+	}
+
+	// 1. Process local notes
+	for id, localNote := range localNotes {
+		remoteNote, existsRemote := remoteIndex[id]
+		lastSyncNote, existsLastSync := lastSyncState[id]
+
+		if !existsRemote {
+			// Doesn't exist on remote. Push it.
+			logger.Infof("Pushing new local note: %s", id)
+			payload, err := storage.LoadNoteLocal(storeDir, id)
+			if err == nil {
+				c.UploadNote(id, payload)
+			}
+			continue
+		}
+
+		// Conflict Guard Logic
+		localChanged := !existsLastSync || localNote.UpdatedAt.After(lastSyncNote.UpdatedAt.Add(time.Second))
+		remoteChanged := !existsLastSync || remoteNote.UpdatedAt.After(lastSyncNote.UpdatedAt.Add(time.Second))
+
+		if localChanged && remoteChanged {
+			// Both changed! Create a fork.
+			conflictID := fmt.Sprintf("%s_conflict_%s", id, time.Now().Format("2006-01-02-150405"))
+			logger.Infof("Conflict detected for %s. Forking local to %s", id, conflictID)
+			
+			// Rename local to conflict ID
+			localPayload, _ := storage.LoadNoteLocal(storeDir, id)
+			storage.SaveNoteLocal(storeDir, conflictID, localPayload)
+			
+			// Download remote
+			remotePayload, err := c.DownloadNote(id)
+			if err == nil {
+				storage.SaveNoteLocal(storeDir, id, remotePayload)
+			}
+			
+			// Push the fork to the remote
+			c.UploadNote(conflictID, localPayload)
+			
+		} else if localChanged && !remoteChanged {
+			// Only local changed
+			logger.Infof("Pushing updated local note: %s", id)
+			payload, err := storage.LoadNoteLocal(storeDir, id)
+			if err == nil {
+				c.UploadNote(id, payload)
+			}
+		} else if !localChanged && remoteChanged {
+			// Only remote changed
+			logger.Infof("Pulling updated remote note: %s", id)
+			payload, err := c.DownloadNote(id)
+			if err == nil {
+				storage.SaveNoteLocal(storeDir, id, payload)
+			}
+		}
+	}
+
+	// 2. Process remote notes that are not local
+	for id := range remoteIndex {
+		if _, exists := localNotes[id]; !exists {
+			logger.Infof("Pulling new remote note: %s", id)
+			payload, err := c.DownloadNote(id)
+			if err == nil {
+				storage.SaveNoteLocal(storeDir, id, payload)
+			}
+		}
+	}
+
+	// Refetch the remote index after all operations to save as the new state
+	finalIndex, err := c.FetchIndex()
+	if err == nil {
+		saveSyncState(storeDir, finalIndex)
+	}
+
+	return nil
+}
