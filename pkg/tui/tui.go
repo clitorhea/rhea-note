@@ -17,6 +17,7 @@ import (
 	"github.com/clitorhea/rhea-note/pkg/config"
 	"github.com/clitorhea/rhea-note/pkg/crypto"
 	"github.com/clitorhea/rhea-note/pkg/storage"
+	"github.com/clitorhea/rhea-note/pkg/sync"
 	"github.com/muesli/reflow/wrap"
 )
 
@@ -221,12 +222,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case 4: // Delete confirm
-			if strings.ToLower(msg.String()) == "y" {
+			msgStr := strings.ToLower(msg.String())
+			if msgStr == "e" || msg.String() == "enter" {
+				storage.DeleteNoteLocal(m.cfg.StoreDir, m.selectedID)
+				
+				// Fire-and-forget remote delete
+				go func(id string) {
+					client := sync.NewClient(m.cfg.ServerURL, m.cfg.Token)
+					client.DeleteNote(id)
+				}(m.selectedID)
+
+				m.state = 0
+				cmd := m.refreshList()
+				return m, cmd
+			} else if msgStr == "l" {
 				storage.DeleteNoteLocal(m.cfg.StoreDir, m.selectedID)
 				m.state = 0
 				cmd := m.refreshList()
 				return m, cmd
-			} else if msg.String() == "n" || msg.String() == "esc" || msg.String() == "enter" {
+			} else if msgStr == "esc" {
 				m.state = 0
 				return m, nil
 			}
@@ -411,7 +425,7 @@ func (m model) View() string {
 		return docStyle.Render(m.linkList.View())
 	
 	case 4:
-		return docStyle.Render(fmt.Sprintf("Are you sure you want to delete '%s'? (y/N)", m.selectedID))
+		return docStyle.Render(fmt.Sprintf("Delete '%s'? Local only (l) or Everywhere (E)? (l/E)\n\n(esc to cancel)", m.selectedID))
 	
 	case 5:
 		header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")).Render(fmt.Sprintf("Editing Note: %s", m.selectedID))
