@@ -17,6 +17,7 @@ import (
 	"github.com/clitorhea/rhea-note/pkg/config"
 	"github.com/clitorhea/rhea-note/pkg/crypto"
 	"github.com/clitorhea/rhea-note/pkg/storage"
+	"github.com/muesli/reflow/wrap"
 )
 
 var (
@@ -215,7 +216,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() == "esc" || msg.String() == "ctrl+s" {
 				m.noteContent = m.editor.Value()
 				m.encryptAndSaveNote()
-				m.viewport.SetContent(m.noteContent)
+				m.viewport.SetContent(wrap.String(m.noteContent, m.viewport.Width))
 				m.state = 2
 				return m, nil
 			}
@@ -229,6 +230,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.Height = msg.Height - v
 		m.editor.SetWidth(msg.Width - h)
 		m.editor.SetHeight(msg.Height - v - 2)
+		if m.noteContent != "" {
+			m.viewport.SetContent(wrap.String(m.noteContent, m.viewport.Width))
+		}
 		m.width = msg.Width
 		m.height = msg.Height
 	}
@@ -292,7 +296,8 @@ func (m *model) decryptNote() {
 	}
 	
 	m.noteContent = string(plaintext)
-	m.viewport.SetContent(m.noteContent)
+	m.viewport.SetContent(wrap.String(m.noteContent, m.viewport.Width))
+	m.viewport.GotoTop()
 	m.err = nil
 }
 
