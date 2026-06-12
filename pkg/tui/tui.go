@@ -153,8 +153,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.state = 0
 				m.err = nil
-				m.refreshList()
-				return m, nil
+				cmd := m.refreshList()
+				return m, cmd
 			}
 			if msg.String() == "tab" || msg.String() == "l" {
 				matches := linkRegex.FindAllStringSubmatch(m.noteContent, -1)
@@ -204,9 +204,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if strings.ToLower(msg.String()) == "y" {
 				storage.DeleteNoteLocal(m.cfg.StoreDir, m.selectedID)
 				m.state = 0
-				m.refreshList()
-				return m, nil
-			} else if msg.String() == "n" || msg.String() == "esc" {
+				cmd := m.refreshList()
+				return m, cmd
+			} else if msg.String() == "n" || msg.String() == "esc" || msg.String() == "enter" {
 				m.state = 0
 				return m, nil
 			}
@@ -250,9 +250,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *model) refreshList() {
+func (m *model) refreshList() tea.Cmd {
 	notes, _ := storage.ListNotesLocalWithTime(m.cfg.StoreDir)
-	m.list.SetItems(buildItems(notes))
+	return m.list.SetItems(buildItems(notes))
 }
 
 func (m model) openNote() (tea.Model, tea.Cmd) {
