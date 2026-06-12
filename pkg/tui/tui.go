@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 
 var (
 	docStyle = lipgloss.NewStyle().Margin(1, 2)
+	linkRegex = regexp.MustCompile(`\[\[(.*?)\]\]`)
 )
 
 type item struct {
@@ -29,23 +31,33 @@ func (i item) Title() string       { return i.id }
 func (i item) Description() string { return i.modTime.Format(time.RFC1123) }
 func (i item) FilterValue() string { return i.id }
 
+type linkItem struct {
+	id string
+}
+
+func (i linkItem) Title() string       { return i.id }
+func (i linkItem) Description() string { return "Jump to this note" }
+func (i linkItem) FilterValue() string { return i.id }
+
 type model struct {
 	list        list.Model
 	password    textinput.Model
 	viewport    viewport.Model
-	state       int // 0: list, 1: password prompt, 2: viewing note
+	linkList    list.Model
+	state       int // 0: list, 1: password prompt, 2: viewing note, 3: links menu
 	selectedID  string
 	noteContent string
 	cfg         *config.Config
 	err         error
 	width       int
 	height      int
+	history     []string
+	pwCache     string
 }
 
 func InitialModel(cfg *config.Config, notes map[string]storage.LocalNoteInfo) model {
 	var items []list.Item
 	
-	// Sort by mod time descending
 	var sortedNotes []storage.LocalNoteInfo
 	for _, n := range notes {
 		sortedNotes = append(sortedNotes, n)
@@ -61,6 +73,9 @@ func InitialModel(cfg *config.Config, notes map[string]storage.LocalNoteInfo) mo
 	m := list.New(items, list.NewDefaultDelegate(), 0, 0)
 	m.Title = "SecNotes"
 
+	ll := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
+	ll.Title = "Linked Notes"
+
 	ti := textinput.New()
 	ti.Placeholder = "Master Password"
 	ti.EchoMode = textinput.EchoPassword
@@ -71,6 +86,7 @@ func InitialModel(cfg *config.Config, notes map[string]storage.LocalNoteInfo) mo
 
 	return model{
 		list:     m,
+		linkList: ll,
 		password: ti,
 		viewport: vp,
 		cfg:      cfg,
@@ -95,24 +111,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				i, ok := m.list.SelectedItem().(item)
 				if ok {
 					m.selectedID = i.id
-					
-					// Check if password is in env
-					envPw := os.Getenv("SECNOTES_PASSWORD")
-					if envPw != "" {
-						m.decryptNote(envPw)
-						m.state = 2
-						return m, nil
-					}
-					
-					m.state = 1
-					m.password.SetValue("")
-					return m, textinput.Blink
+					m.history = []string{} // clear history when entering from main list
+					return m.openNote()
 				}
 			}
 			
 		case 1: // Password prompt
 			if msg.String() == "enter" {
-				m.decryptNote(m.password.Value())
+				m.pwCache = m.password.Value()
+				m.decryptNote()
 				m.state = 2
 				return m, nil
 			} else if msg.String() == "esc" {
@@ -122,15 +129,56 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			
 		case 2: // Viewport
 			if msg.String() == "esc" || msg.String() == "q" {
+				if len(m.history) > 0 {
+					// Pop history
+					m.selectedID = m.history[len(m.history)-1]
+					m.history = m.history[:len(m.history)-1]
+					return m.openNote()
+				}
 				m.state = 0
 				m.err = nil
 				return m, nil
+			}
+			if msg.String() == "tab" || msg.String() == "l" {
+				// Extract links
+				matches := linkRegex.FindAllStringSubmatch(m.noteContent, -1)
+				var items []list.Item
+				seen := make(map[string]bool)
+				for _, match := range matches {
+					if len(match) > 1 {
+						id := match[1]
+						if !seen[id] {
+							items = append(items, linkItem{id: id})
+							seen[id] = true
+						}
+					}
+				}
+				if len(items) > 0 {
+					m.linkList.SetItems(items)
+					m.state = 3
+				}
+				return m, nil
+			}
+
+		case 3: // Links menu
+			if msg.String() == "esc" {
+				m.state = 2 // go back to viewport
+				return m, nil
+			}
+			if msg.String() == "enter" {
+				i, ok := m.linkList.SelectedItem().(linkItem)
+				if ok {
+					m.history = append(m.history, m.selectedID)
+					m.selectedID = i.id
+					return m.openNote()
+				}
 			}
 		}
 
 	case tea.WindowSizeMsg:
 		h, v := docStyle.GetFrameSize()
 		m.list.SetSize(msg.Width-h, msg.Height-v)
+		m.linkList.SetSize(msg.Width-h, msg.Height-v)
 		m.viewport.Width = msg.Width - h
 		m.viewport.Height = msg.Height - v
 		m.width = msg.Width
@@ -145,23 +193,45 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.password, cmd = m.password.Update(msg)
 	case 2:
 		m.viewport, cmd = m.viewport.Update(msg)
+	case 3:
+		m.linkList, cmd = m.linkList.Update(msg)
 	}
 
 	return m, cmd
 }
 
-func (m *model) decryptNote(password string) {
-	key := crypto.DeriveKey(password, m.cfg.Salt)
+func (m model) openNote() (tea.Model, tea.Cmd) {
+	envPw := os.Getenv("SECNOTES_PASSWORD")
+	if envPw != "" {
+		m.pwCache = envPw
+	}
+	if m.pwCache != "" {
+		m.decryptNote()
+		m.state = 2
+		return m, nil
+	}
+	m.state = 1
+	m.password.SetValue("")
+	return m, textinput.Blink
+}
+
+func (m *model) decryptNote() {
+	key := crypto.DeriveKey(m.pwCache, m.cfg.Salt)
 	
 	ciphertext, err := storage.LoadNoteLocal(m.cfg.StoreDir, m.selectedID)
 	if err != nil {
-		m.err = err
+		m.err = fmt.Errorf("failed to load note %s: %v", m.selectedID, err)
+		m.noteContent = ""
+		m.viewport.SetContent("")
 		return
 	}
 	
 	plaintext, err := crypto.Decrypt(ciphertext, key)
 	if err != nil {
 		m.err = fmt.Errorf("failed to decrypt (wrong password?)")
+		m.pwCache = "" // clear wrong password
+		m.noteContent = ""
+		m.viewport.SetContent("")
 		return
 	}
 	
@@ -186,14 +256,32 @@ func (m model) View() string {
 		))
 	case 2:
 		if m.err != nil {
-			return docStyle.Render(fmt.Sprintf("Error:\n%v\n\n(esc to go back)", m.err))
+			errText := fmt.Sprintf("Error:\n%v\n\n", m.err)
+			if len(m.history) > 0 {
+				errText += "(esc or q to go back)"
+			} else {
+				errText += "(esc or q to go to menu)"
+			}
+			return docStyle.Render(errText)
 		}
 		
 		header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).Render(fmt.Sprintf("Viewing Note: %s", m.selectedID))
-		footer := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("(esc or q to go back)")
+		footerText := "(esc or q to go back)"
+		if len(m.history) > 0 {
+			footerText = fmt.Sprintf("(esc or q to go back to %s)", m.history[len(m.history)-1])
+		}
+		
+		matches := linkRegex.FindAllStringSubmatch(m.noteContent, -1)
+		if len(matches) > 0 {
+			footerText += " • (tab or l to jump to links)"
+		}
+
+		footer := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(footerText)
 		
 		content := fmt.Sprintf("%s\n\n%s\n\n%s", header, m.viewport.View(), footer)
 		return docStyle.Render(content)
+	case 3:
+		return docStyle.Render(m.linkList.View())
 	}
 
 	return ""
