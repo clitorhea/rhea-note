@@ -26,11 +26,30 @@ type Server struct {
 
 func NewServer(storeDir, token string) *Server {
 	os.MkdirAll(storeDir, 0700)
-	return &Server{
+	
+	s := &Server{
 		StoreDir: storeDir,
 		Token:    token,
 		index:    make(map[string]IndexEntry),
 	}
+	
+	// Rebuild index from existing files on disk
+	entries, err := os.ReadDir(storeDir)
+	if err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				info, err := entry.Info()
+				if err == nil {
+					s.index[entry.Name()] = IndexEntry{
+						NoteID:    entry.Name(),
+						UpdatedAt: info.ModTime(),
+					}
+				}
+			}
+		}
+	}
+	
+	return s
 }
 
 func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -95,9 +114,11 @@ func (s *Server) handleGetNote(w http.ResponseWriter, r *http.Request, noteID st
 }
 
 func (s *Server) handlePutNote(w http.ResponseWriter, r *http.Request, noteID string) {
+	// Enforce a strict 10MB limit on note size to prevent OOM
+	r.Body = http.MaxBytesReader(w, r.Body, 10*1024*1024)
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "payload too large or read error", http.StatusRequestEntityTooLarge)
 		return
 	}
 	
@@ -107,10 +128,16 @@ func (s *Server) handlePutNote(w http.ResponseWriter, r *http.Request, noteID st
 		return
 	}
 	
+	info, err := os.Stat(path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	
 	s.mu.Lock()
 	s.index[noteID] = IndexEntry{
 		NoteID:    noteID,
-		UpdatedAt: time.Now(),
+		UpdatedAt: info.ModTime(),
 	}
 	s.mu.Unlock()
 	
