@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/clitorhea/rhea-note/pkg/api"
 )
@@ -12,7 +13,14 @@ import (
 func main() {
 	port := flag.Int("port", 8080, "Port to listen on")
 	storeDir := flag.String("store", "./server-data", "Directory to store encrypted notes")
-	token := flag.String("token", "secret-token", "Authentication token")
+	
+	// Fallback to environment variable if flag is not explicitly passed
+	defaultToken := os.Getenv("SECNOTES_TOKEN")
+	if defaultToken == "" {
+		defaultToken = "secret-token" // Default for local development
+	}
+	token := flag.String("token", defaultToken, "Authentication token")
+	
 	flag.Parse()
 
 	server := api.NewServer(*storeDir, *token)
