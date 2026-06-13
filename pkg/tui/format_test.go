@@ -5,9 +5,9 @@ import (
 )
 
 func TestAutoFormat(t *testing.T) {
-	content := "```json\n{\"a\":1}\n```"
-	formatted := autoFormatNote(content)
-	if formatted == content {
+	input := `{"key": "value"}`
+	formatted, _ := autoFormatNote(input)
+	if formatted == input {
 		t.Errorf("Failed to format: %q", formatted)
 	} else {
 		t.Logf("Formatted: %q", formatted)
