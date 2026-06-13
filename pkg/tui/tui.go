@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/clitorhea/rhea-note/pkg/auth"
 	"github.com/clitorhea/rhea-note/pkg/config"
 	"github.com/clitorhea/rhea-note/pkg/crypto"
 	"github.com/clitorhea/rhea-note/pkg/storage"
@@ -151,6 +151,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case 1: // Password prompt
 			if msg.String() == "enter" {
 				m.pwCache = m.password.Value()
+				// Automatically save password to keyring
+				_ = auth.SavePassword(m.pwCache)
 				m.decryptNote()
 				m.state = 2
 				return m, nil
@@ -332,9 +334,9 @@ func (m *model) refreshList() tea.Cmd {
 }
 
 func (m model) openNote() (tea.Model, tea.Cmd) {
-	envPw := os.Getenv("SECNOTES_PASSWORD")
-	if envPw != "" {
-		m.pwCache = envPw
+	pw, err := auth.GetPassword()
+	if err == nil && pw != "" {
+		m.pwCache = pw
 	}
 	if m.pwCache != "" {
 		m.decryptNote()

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/clitorhea/rhea-note/pkg/auth"
 	"github.com/clitorhea/rhea-note/pkg/config"
 	"github.com/clitorhea/rhea-note/pkg/crypto"
 	"github.com/spf13/cobra"
@@ -48,6 +49,13 @@ var initCmd = &cobra.Command{
 
 		if err := config.SaveConfig(cfg); err != nil {
 			return err
+		}
+		
+		// Attempt to save to OS keyring
+		if err := auth.SavePassword(string(password)); err != nil {
+			fmt.Printf("Warning: Could not save password to OS Keyring: %v\n", err)
+		} else {
+			fmt.Println("Master password securely saved to OS Keyring.")
 		}
 
 		fmt.Println("Configuration successfully initialized.")
