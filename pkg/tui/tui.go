@@ -175,9 +175,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if msg.String() == "f" {
 				// Intelligent Auto-format
-				m.noteContent = autoFormatNote(m.noteContent)
-				m.encryptAndSaveNote()
-				m.viewport.SetContent(wrap.String(m.noteContent, m.viewport.Width))
+				formatted, err := autoFormatNote(m.noteContent)
+				if err != nil {
+					m.err = fmt.Errorf("Format error: %v", err)
+				} else if formatted != m.noteContent {
+					m.noteContent = formatted
+					m.encryptAndSaveNote()
+					m.viewport.SetContent(wrap.String(m.noteContent, m.viewport.Width))
+					// Small flash message trick in err variable
+					m.err = fmt.Errorf("Formatted successfully!")
+				} else {
+					m.err = fmt.Errorf("Already formatted!")
+				}
 				return m, nil
 			}
 			if msg.String() == "tab" || msg.String() == "l" {
