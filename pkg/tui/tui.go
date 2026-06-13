@@ -61,6 +61,7 @@ type model struct {
 	history              []string
 	pwCache              string
 	creatingFromViewport bool
+	markdownRendered     bool
 }
 
 func InitialModel(cfg *config.Config, notes map[string]storage.LocalNoteInfo) model {
@@ -169,8 +170,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.state = 0
 				m.err = nil
+				m.markdownRendered = false
 				cmd := m.refreshList()
 				return m, cmd
+			}
+			if msg.String() == "p" {
+				m.markdownRendered = !m.markdownRendered
+				if m.markdownRendered {
+					m.viewport.SetContent(renderMarkdown(m.noteContent, m.viewport.Width))
+				} else {
+					m.viewport.SetContent(wrap.String(m.noteContent, m.viewport.Width))
+				}
+				return m, nil
 			}
 			if msg.String() == "tab" || msg.String() == "l" {
 				matches := linkRegex.FindAllStringSubmatch(m.noteContent, -1)
@@ -250,7 +261,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() == "esc" || msg.String() == "ctrl+s" {
 				m.noteContent = m.editor.Value()
 				m.encryptAndSaveNote()
-				m.viewport.SetContent(renderMarkdown(m.noteContent, m.viewport.Width))
+				m.markdownRendered = false
+				m.viewport.SetContent(wrap.String(m.noteContent, m.viewport.Width))
 				m.state = 2
 				return m, nil
 			}
@@ -295,7 +307,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editor.SetWidth(msg.Width - h)
 		m.editor.SetHeight(msg.Height - v - 4)
 		if m.noteContent != "" {
-			m.viewport.SetContent(renderMarkdown(m.noteContent, m.viewport.Width))
+			if m.markdownRendered {
+				m.viewport.SetContent(renderMarkdown(m.noteContent, m.viewport.Width))
+			} else {
+				m.viewport.SetContent(wrap.String(m.noteContent, m.viewport.Width))
+			}
 		}
 		m.width = msg.Width
 		m.height = msg.Height
@@ -362,7 +378,8 @@ func (m *model) decryptNote() {
 	}
 	
 	m.noteContent = string(plaintext)
-	m.viewport.SetContent(renderMarkdown(m.noteContent, m.viewport.Width))
+	m.markdownRendered = false
+	m.viewport.SetContent(wrap.String(m.noteContent, m.viewport.Width))
 	m.viewport.GotoTop()
 	m.err = nil
 }
@@ -406,7 +423,7 @@ func (m model) View() string {
 		}
 		
 		header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).Render(fmt.Sprintf("Viewing Note: %s", m.selectedID))
-		footerText := "(e: edit) • (d: delete) • (n: new page) • "
+		footerText := "(e: edit) • (p: preview md) • (d: delete) • (n: new page) • "
 		if len(m.history) > 0 {
 			footerText += fmt.Sprintf("(esc/q: back to %s)", m.history[len(m.history)-1])
 		} else {
