@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/clitorhea/rhea-note/pkg/config"
+	"github.com/charmbracelet/glamour"
 	"github.com/clitorhea/rhea-note/pkg/crypto"
 	"github.com/clitorhea/rhea-note/pkg/storage"
 	"github.com/clitorhea/rhea-note/pkg/sync"
@@ -249,7 +250,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() == "esc" || msg.String() == "ctrl+s" {
 				m.noteContent = m.editor.Value()
 				m.encryptAndSaveNote()
-				m.viewport.SetContent(wrap.String(m.noteContent, m.viewport.Width))
+				m.viewport.SetContent(renderMarkdown(m.noteContent, m.viewport.Width))
 				m.state = 2
 				return m, nil
 			}
@@ -294,7 +295,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editor.SetWidth(msg.Width - h)
 		m.editor.SetHeight(msg.Height - v - 4)
 		if m.noteContent != "" {
-			m.viewport.SetContent(wrap.String(m.noteContent, m.viewport.Width))
+			m.viewport.SetContent(renderMarkdown(m.noteContent, m.viewport.Width))
 		}
 		m.width = msg.Width
 		m.height = msg.Height
@@ -361,7 +362,7 @@ func (m *model) decryptNote() {
 	}
 	
 	m.noteContent = string(plaintext)
-	m.viewport.SetContent(wrap.String(m.noteContent, m.viewport.Width))
+	m.viewport.SetContent(renderMarkdown(m.noteContent, m.viewport.Width))
 	m.viewport.GotoTop()
 	m.err = nil
 }
@@ -441,4 +442,19 @@ func (m model) View() string {
 	}
 
 	return ""
+}
+
+func renderMarkdown(content string, width int) string {
+	r, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(width),
+	)
+	if err != nil {
+		return wrap.String(content, width)
+	}
+	out, err := r.Render(content)
+	if err != nil {
+		return wrap.String(content, width)
+	}
+	return out
 }
