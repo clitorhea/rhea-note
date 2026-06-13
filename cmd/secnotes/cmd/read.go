@@ -13,7 +13,8 @@ import (
 )
 
 var readCmd = &cobra.Command{
-	Use:   "read [note-id]",
+	Use:     "read [note-id]",
+	Aliases: []string{"r"},
 	Short: "Decrypt and read a note",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

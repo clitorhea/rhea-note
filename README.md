@@ -36,20 +36,21 @@ sudo cp bin/linux-amd64/secnotes /usr/local/bin/
 ## Usage
 
 ### 1. Initialize the CLI
-Before you can take notes, initialize the application. This will generate your cryptographic salt and configure your remote server URL.
+Before you can take notes, initialize the application. This will generate your cryptographic salt, configure your remote server URL, and securely link your device footprint into your OS Keyring.
 ```bash
-secnotes init
+secnotes init (alias: i)
 ```
 *You will be prompted to enter a Master Password. Do not lose this!*
 
 ### 2. Interactive Terminal UI
-Browse, edit, delete, and link your notes using the interactive TUI.
+Browse, edit, format, delete, and link your notes using the interactive TUI.
 ```bash
-secnotes browse
+secnotes browse (alias: b)
 ```
 **Hotkeys inside the TUI:**
 - `Enter`: Open a note
 - `e`: Edit the current note inline
+- `f`: Auto-format JSON/Code natively within your note
 - `n`: Create a new nested note instantly
 - `d` or `delete`: Delete a note (prompts to delete locally or instantly wipe from remote server)
 - `tab` or `l`: Jump to `[[Links]]` within the note
@@ -58,11 +59,11 @@ secnotes browse
 ### 3. CLI Read & Write
 To manually write a note, pipe text to standard input:
 ```bash
-echo "My top secret note" | secnotes write my-first-note
+echo "My top secret note" | secnotes write my-first-note (alias: w)
 ```
 To read a note to standard output:
 ```bash
-secnotes read my-first-note
+secnotes read my-first-note (alias: r)
 ```
 
 ### 4. Background Syncing
@@ -72,7 +73,7 @@ secnotes sync-daemon
 ```
 Alternatively, trigger a one-off manual sync:
 ```bash
-secnotes sync
+secnotes sync (alias: s)
 ```
 
 ## Server Deployment

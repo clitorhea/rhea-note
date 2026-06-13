@@ -14,7 +14,8 @@ import (
 )
 
 var writeCmd = &cobra.Command{
-	Use:   "write [note-id]",
+	Use:     "write [note-id]",
+	Aliases: []string{"w"},
 	Short: "Write and encrypt a note from STDIN",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
