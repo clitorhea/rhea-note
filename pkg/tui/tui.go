@@ -244,11 +244,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msgStr == "e" || msg.String() == "enter" {
 				storage.DeleteNoteLocal(m.cfg.StoreDir, m.selectedID)
 				
-				// Fire-and-forget remote delete
-				go func(id string) {
-					client := sync.NewClient(m.cfg.ServerURL, m.cfg.Token)
-					client.DeleteNote(id)
-				}(m.selectedID)
+				// Synchronous remote delete to prevent race conditions with subsequent syncs
+				client := sync.NewClient(m.cfg.ServerURL, m.cfg.Token)
+				client.DeleteNote(m.selectedID)
 
 				m.state = 0
 				cmd := m.refreshList()

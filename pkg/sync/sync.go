@@ -51,16 +51,22 @@ func (c *Client) Synchronize(storeDir string) error {
 		remoteChanged := !existsLastSync || remoteNote.UpdatedAt.After(lastSyncNote.UpdatedAt.Add(time.Second))
 
 		if localChanged && remoteChanged {
-			// Both changed! Create a fork.
+			// Check if contents are actually identical before forking
+			localPayload, _ := storage.LoadNoteLocal(storeDir, id)
+			remotePayload, err := c.DownloadNote(id)
+			if err == nil && string(localPayload) == string(remotePayload) {
+				logger.Infof("Files identical, skipping conflict for: %s", id)
+				continue
+			}
+
+			// Both changed and contents differ! Create a fork.
 			conflictID := fmt.Sprintf("%s_conflict_%s", id, time.Now().Format("2006-01-02-150405"))
 			logger.Infof("Conflict detected for %s. Forking local to %s", id, conflictID)
 			
 			// Rename local to conflict ID
-			localPayload, _ := storage.LoadNoteLocal(storeDir, id)
 			storage.SaveNoteLocal(storeDir, conflictID, localPayload)
 			
-			// Download remote
-			remotePayload, err := c.DownloadNote(id)
+			// Remote payload already downloaded, just save it locally
 			if err == nil {
 				storage.SaveNoteLocal(storeDir, id, remotePayload)
 			}
